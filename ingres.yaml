@@ -3,7 +3,7 @@ kind: Ingress
 metadata:
   name: simple-example
   annotations:
-    kubernetes.io/ingress.class: "nginx"
+    kubernetes.io/ingress.class: 
     nginx.ingress.kubernetes.io/rewrite-target: /$1
 spec:
   defaultBackend:
@@ -12,7 +12,7 @@ spec:
       port:
         number: 8080
   rules:
-  - host: kubernetes.docker.internal
+  - host: app.192.168.254.141.nip.io
     http:
       paths:
       - path: /one/?(.*)
