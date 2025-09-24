@@ -12,7 +12,7 @@ spec:
   - host: app1.192.168.254.141.nip.io
     http:
       paths:
-      - path: /one/?(.*)
+      - path: /
         pathType: Prefix
         backend:
           service:
@@ -22,10 +22,11 @@ spec:
   - host: app2.192.168.254.141.nip.io
     http:
       paths:
-      - path: /two/?(.*)
+      - path: /
         pathType: Prefix
         backend:
           service:
             name: test-second
             port:
               number: 8080
+
