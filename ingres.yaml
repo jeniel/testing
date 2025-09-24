@@ -9,7 +9,7 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-  - host: application1.192.168.254.141.nip.io
+  - host: app1.192.168.254.141.nip.io
     http:
       paths:
       - path: /one
@@ -19,7 +19,7 @@ spec:
             name: test-first
             port:
               number: 8080
-  - host: application2.192.168.254.141.nip.io
+  - host: app2.192.168.254.141.nip.io
     http:
       paths:
       - path: /two
