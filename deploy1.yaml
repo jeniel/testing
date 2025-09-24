@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-first
+  labels:
+    app: test-first
+spec:
+  selector:
+    matchLabels:
+      app: test-first
+  template:
+    metadata:
+      labels:
+        app: test-first
+    spec:
+      containers:
+      - name: sample-first
+        image: jeniel/next1:latest 
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-first
+spec:
+  type: ClusterIP
+  selector:
+    app: test-first
+  ports:
+  - name: http
+    port: 8080
