@@ -12,7 +12,7 @@ spec:
   - host: app1.192.168.254.141.nip.io
     http:
       paths:
-      - path: /
+      - path: /one/?(.*)
         pathType: Prefix
         backend:
           service:
@@ -22,7 +22,7 @@ spec:
   - host: app2.192.168.254.141.nip.io
     http:
       paths:
-      - path: /
+      - path: /two/?(.*)
         pathType: Prefix
         backend:
           service:
