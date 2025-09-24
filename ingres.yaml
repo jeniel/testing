@@ -1,3 +1,4 @@
+
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -6,24 +7,19 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /$1
 spec:
-  ingressClassName: nginx 
-  defaultBackend:
-    service:
-      name: test-second
-      port:
-        number: 8080
+  ingressClassName: nginx
   rules:
   - host: app.192.168.254.141.nip.io
     http:
       paths:
-      - path: /one/?(.*)
+      - path: /one
         pathType: Prefix
         backend:
           service:
             name: test-first
             port:
               number: 8080
-      - path: /two/?(.*)
+      - path: /two
         pathType: Prefix
         backend:
           service:
