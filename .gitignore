@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environment
+venv/
+.env/
+env/
+.venv/
+
+# Logs and runtime data
+*.log
+*.pid
+*.csv
+*.db
+*.sqlite3
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+
+# PyInstaller
+*.spec
+dist/
+build/
+
+# Coverage and testing
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
+
+# Local config files
+config.yaml
+.env.local
+.env.dev

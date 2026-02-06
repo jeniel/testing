@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  zkteco-middleware:
+    build: .
+    ports:
+      - "4000:4000"
+    environment:
+      - FLASK_ENV=production
+    restart: unless-stopped
+    networks:
+      - zkteco-net
+
+networks:
+  zkteco-net:
+    driver: bridge
