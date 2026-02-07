@@ -1,86 +1,122 @@
 from flask import Flask, jsonify, request
-from zk import ZK
+from zk import ZK, const
 from datetime import datetime
 import os
+import locale
+import sys
 import time
 
 # =====================================================
-# ENVIRONMENT FIX (Kubernetes / Docker SAFE)
+# ENVIRONMENT INITIALIZATION (Docker / K8s SAFE)
 # =====================================================
-os.environ["TZ"] = "Asia/Manila"
-if hasattr(time, "tzset"):
-    time.tzset()
+def initialize_environment():
+    """
+    Force consistent locale and timezone handling.
+    Target timezone: Asia/Manila (PHT)
+    """
+    # Locale (avoid date parsing issues)
+    try:
+        locale.setlocale(locale.LC_ALL, "C")
+    except:
+        pass
+
+    # Timezone
+    os.environ["TZ"] = "Asia/Manila"
+    if hasattr(time, "tzset"):
+        time.tzset()
+
+initialize_environment()
 
 app = Flask(__name__)
 
 # =====================================================
-# CONFIG
+# TIMESTAMP FORMATS
+# =====================================================
+TIMESTAMP_FORMATS = [
+    "%Y-%m-%d %H:%M:%S",
+    "%d-%m-%Y %H:%M:%S",
+    "%m-%d-%Y %H:%M:%S",
+    "%Y/%m/%d %H:%M:%S",
+    "%d/%m/%Y %H:%M:%S",
+    "%m/%d/%Y %H:%M:%S",
+    "%Y%m%d%H%M%S",
+    "%d.%m.%Y %H:%M:%S",
+    "%Y.%m.%d %H:%M:%S",
+]
+
+def safe_parse_timestamp(ts):
+    """
+    Safely parse timestamps from ZKTeco.
+    Always returns NAIVE datetime assumed as PHT.
+    """
+    debug = {
+        "original_value": ts,
+        "original_type": type(ts).__name__,
+        "parsed_successfully": False,
+        "format_used": None,
+    }
+
+    if isinstance(ts, datetime):
+        debug["parsed_successfully"] = True
+        debug["format_used"] = "datetime_object"
+        return ts.replace(tzinfo=None), debug
+
+    if isinstance(ts, str):
+        for fmt in TIMESTAMP_FORMATS:
+            try:
+                parsed = datetime.strptime(ts, fmt)
+                debug["parsed_successfully"] = True
+                debug["format_used"] = fmt
+                return parsed, debug
+            except ValueError:
+                continue
+
+    debug["error"] = "Unable to parse timestamp"
+    return None, debug
+
+# =====================================================
+# DEVICE CONFIG
 # =====================================================
 DEFAULT_PORT = int(os.getenv("DEVICE_PORT", 4370))
 DEFAULT_DEVICE_IP = os.getenv("DEVICE_IP")
 
+def connect_device(ip: str):
+    zk = ZK(ip, port=DEFAULT_PORT, timeout=5)
+    conn = zk.connect()
+    return zk, conn
+
+def safe_get_attendance(conn, device_ip):
+    """
+    Fetch attendance safely under PHT timezone.
+    """
+    try:
+        return conn.get_attendance(), None
+    except Exception as e:
+        error_msg = str(e)
+        if "day is out of range for month" in error_msg:
+            return None, {
+                "error_type": "timezone_date_parsing_error",
+                "original_error": error_msg,
+                "device_ip": device_ip,
+                "timezone_used": "Asia/Manila",
+            }
+        return None, {
+            "error_type": "general_error",
+            "original_error": error_msg,
+            "device_ip": device_ip,
+        }
+
+# =====================================================
+# PUNCH STATE MAP
+# =====================================================
 PUNCH_STATE = {
     0: "IN",
     1: "OUT",
     2: "BREAK_IN",
     3: "BREAK_OUT",
     4: "OVERTIME_IN",
-    5: "OVERTIME_OUT"
+    5: "OVERTIME_OUT",
 }
-
-# =====================================================
-# UTILS
-# =====================================================
-def connect_device(ip: str):
-    zk = ZK(ip, port=DEFAULT_PORT, timeout=5)
-    conn = zk.connect()
-    return zk, conn
-
-
-def safe_parse_timestamp(ts):
-    """
-    FINAL SAFE timestamp parser
-    - skips corrupted ZKTeco records
-    - Python 3.11 safe
-    """
-    try:
-        if ts is None:
-            return None
-
-        if isinstance(ts, datetime):
-            ts.replace()  # force validation
-            return ts
-
-        if isinstance(ts, str):
-            return datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S")
-
-    except Exception:
-        return None
-
-
-def safe_get_attendance(conn):
-    """
-    CRITICAL FIX:
-    - skips corrupted records BEFORE they crash the app
-    """
-    valid_records = []
-    skipped = 0
-
-    for att in conn.get_attendance():
-        try:
-            ts = att.timestamp
-            parsed = safe_parse_timestamp(ts)
-            if parsed is None:
-                skipped += 1
-                continue
-
-            valid_records.append(att)
-
-        except Exception:
-            skipped += 1
-
-    return valid_records, skipped
-
 
 # =====================================================
 # ROUTES
@@ -89,76 +125,79 @@ def safe_get_attendance(conn):
 def get_logs():
     ip = request.args.get("ip") or DEFAULT_DEVICE_IP
     if not ip:
-        return jsonify({
-            "success": False,
-            "message": "Missing required parameter: ip"
-        }), 400
+        return jsonify({"success": False, "message": "Missing ip"}), 400
 
-    # Optional start date filter
-    start_date = None
     start_date_str = request.args.get("start")
-    if start_date_str:
-        try:
-            start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
-        except ValueError:
-            return jsonify({
-                "success": False,
-                "message": "Invalid start date format. Use YYYY-MM-DD"
-            }), 400
+    start_date = datetime.strptime(start_date_str, "%Y-%m-%d") if start_date_str else None
 
-    zk = conn = None
     try:
         zk, conn = connect_device(ip)
-        attendances, skipped = safe_get_attendance(conn)
+        attendances, error_info = safe_get_attendance(conn, ip)
+        conn.disconnect()
+
+        if attendances is None:
+            return jsonify({"success": False, "error": error_info}), 500
 
         logs = []
+        parsing_errors = []
 
-        for att in attendances:
-            timestamp = safe_parse_timestamp(att.timestamp)
-            if timestamp is None:
+        for i, att in enumerate(attendances):
+            ts, debug = safe_parse_timestamp(att.timestamp)
+            if not ts:
+                parsing_errors.append({"index": i, "debug": debug})
                 continue
 
-            if start_date and timestamp < start_date:
+            if start_date and ts < start_date:
                 continue
 
-            punch_code = getattr(att, "punch", None)
-            if punch_code is None:
-                punch_code = getattr(att, "status", None)
+            punch_code = getattr(att, "punch", getattr(att, "status", None))
 
             logs.append({
                 "user_id": att.user_id,
-                "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S"),
                 "punch": PUNCH_STATE.get(punch_code, "Unknown"),
-                "status": getattr(att, "status", None),
+                "raw_punch_code": punch_code,
             })
 
-        return jsonify({
+        response = {
             "success": True,
             "count": len(logs),
             "logs": logs,
-            "total_corrupted_skipped": skipped,
-            "device_ip": ip
-        })
+            "device_ip": ip,
+        }
+
+        if parsing_errors:
+            response["parsing_errors"] = parsing_errors[:10]
+            response["total_parsing_errors"] = len(parsing_errors)
+
+        return jsonify(response)
 
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": str(e),
-            "device_ip": ip
-        }), 500
+        return jsonify({"success": False, "message": str(e)}), 500
 
-    finally:
-        if conn:
-            conn.disconnect()
+@app.route("/ping-test")
+def ping_test():
+    ip = request.args.get("ip") or DEFAULT_DEVICE_IP
+    if not ip:
+        return jsonify({"success": False, "message": "Missing ip"}), 400
 
+    try:
+        zk, conn = connect_device(ip)
+        info = conn.get_device_name()
+        conn.disconnect()
+        return jsonify({"success": True, "device_info": info})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/ping")
-def ping():
-    return jsonify({"success": True, "message": "ZKTeco middleware is alive"})
+@app.route("/")
+def home():
+    return jsonify({
+        "routes": {
+            "/ping-test?ip=DEVICE_IP": "Test device connection",
+            "/logs?ip=DEVICE_IP&start=YYYY-MM-DD": "Fetch attendance logs",
+        },
+        "timezone": "Asia/Manila (PHT)",
+    })
 
-
-# =====================================================
-# MAIN
-# =====================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=4000, debug=True)
