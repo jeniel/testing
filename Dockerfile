@@ -1,45 +1,47 @@
-# Base image
-FROM python:3.9-slim
+# Use Python 3.9 bullseye image as base
+FROM python:3.9-bullseye
 
-# Working directory
+# Set working directory
 WORKDIR /app
 
-# Environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    TZ=Asia/Manila
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV TZ=Asia/Manila
 
-# Install system dependencies + tzdata
+# Install system dependencies
+# - gcc (for some Python deps)
+# - iputils-ping (para makapag-ping)
+# - tzdata (IMPORTANT for timezone)
 RUN apt-get update && apt-get install -y \
     gcc \
     iputils-ping \
-    libcap2-bin \
     tzdata \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && ln -sf /usr/share/zoneinfo/Asia/Manila /etc/localtime \
+    && echo "Asia/Manila" > /etc/timezone \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python requirements
+# Copy requirements first to leverage Docker cache
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# ZKTeco patch (skip invalid timestamps)
-RUN SITE_PKG=$(python -c "import site; print(site.getsitepackages()[0])") && \
-    sed -i 's/return datetime(year, month, day, hour, minute, second)/try:\n            return datetime(year, month, day, hour, minute, second)\n        except ValueError:\n            return None/g' ${SITE_PKG}/zk/base.py
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
 
-# Add non-root user and permissions
+# Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser && \
-    chown -R appuser:appuser /app && \
-    setcap cap_net_raw+ep /usr/bin/ping
+    chown -R appuser:appuser /app
 
-# Copy entrypoint
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Allow non-root user to use ping
+RUN setcap cap_net_raw+ep /usr/bin/ping || true
 
 USER appuser
+
+# Expose the port the app runs on
 EXPOSE 4000
 
-# Entrypoint & CMD
-ENTRYPOINT ["/entrypoint.sh"]
+# Run the application
 CMD ["python", "zktime_server.py"]
